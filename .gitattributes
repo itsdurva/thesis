@@ -1,0 +1,2 @@
+newcorpus/* filter=lfs diff=lfs merge=lfs -text
+newcorpus/** filter=lfs diff=lfs merge=lfs -text
