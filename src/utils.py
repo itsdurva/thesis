@@ -7,6 +7,9 @@ import json
 import torch
 import tqdm
 import numpy as np
+import chromadb
+from chromadb import Client
+from chromadb.config import Settings
 
 corpus_names = {
     "PubMed": ["pubmed"],
@@ -98,7 +101,144 @@ def embed(chunk_dir, index_dir, model_name, **kwarg):
         embed_chunks = model.encode([""], **kwarg)
     return embed_chunks.shape[-1]
 
-def construct_index(index_dir, model_name, h_dim=768, HNSW=False, M=32):
+def construct_chromadb_with_faiss(index_dir, model_name, h_dim=768, HNSW=False, M=32):
+    """
+    Construct a ChromaDB collection backed by a FAISS index.
+
+    Args:
+        index_dir (str): Directory containing embeddings and metadata.
+        model_name (str): Name of the model.
+        h_dim (int): Embedding dimension (default 768).
+        HNSW (bool): Whether to use HNSW indexing.
+        M (int): HNSW parameter (number of neighbors) if HNSW=True.
+
+    Returns:
+        collection: ChromaDB collection with FAISS backend.
+    """
+    MAX_BATCH_SIZE = 5100
+    chroma_client = chromadb.PersistentClient(path=index_dir)
+    all_metadatas = []
+    # Collection name
+    temp = index_dir.strip("/").split("/")
+    collection_name = f"{temp[-4]}_{temp[-1]}"
+    # print(collection_name)
+
+    # Create or get collection
+    if collection_name in [c.name for c in chroma_client.list_collections()]:
+        print("getting collection")
+        collection = chroma_client.get_collection(name=collection_name)
+    else:
+        # Choose metric based on model_name
+        metric = "cosine" if "specter" not in model_name.lower() else "euclidean"
+
+        # HNSW-specific parameters are passed as metadata (ChromaDB currently does not expose M directly)
+        collection = chroma_client.create_collection(
+            name=collection_name,
+            metadata={"model": model_name, "dim": h_dim, "HNSW": HNSW, "M": M, "metric": metric},  
+            #index_type="IndexFlatIP"
+        )
+
+    # Clear old metadata file
+    metadata_path = os.path.join(index_dir, "metadatas.jsonl")
+    with open(metadata_path, 'w') as f:
+        f.write("")
+
+    # Add embeddings and metadata
+    embedding_dir = os.path.join(index_dir, "embedding")
+    for fname in tqdm.tqdm(sorted(os.listdir(embedding_dir))):
+        if not fname.endswith(".npy"):
+            continue
+        #embeddings = np.load(os.path.join(embedding_dir, fname)).tolist()
+        embeddings = np.load(os.path.join(embedding_dir, fname))
+        ids = [f"{fname.replace('.npy','')}_{i}" for i in range(len(embeddings))]
+        metadatas = [{"index": i, "source": fname.replace(".npy", "")} for i in range(len(embeddings))]
+        all_metadatas.extend(metadatas)
+
+        # Add to ChromaDB collection
+        for start in range(0, len(embeddings), MAX_BATCH_SIZE):
+            end = min(start + MAX_BATCH_SIZE, len(embeddings))
+            batch_ids = ids[start:end]
+            batch_embeddings = embeddings[start:end]
+            batch_metadatas = metadatas[start:end]
+
+            collection.upsert(
+                ids=batch_ids,
+                embeddings=batch_embeddings,
+                metadatas=batch_metadatas
+            )
+
+        # Also append metadata to file
+    with open(metadata_path, 'a+') as f:
+        for meta in all_metadatas:
+            f.write(json.dumps(meta) + "\n")
+
+    # Persist ChromaDB collection
+    #chroma_client.persist()
+
+    return collection
+
+
+def construct_ivfpq(index_dir,
+                    model_name,
+                    HNSW=False,
+                    M=32,
+                    h_dim=768,
+                    nlist=4096,
+                    m=64,
+                    nbits=8,
+                    train_sample_size=200000,
+                    batch_size=5000):
+    """
+    Memory-safe FAISS IVF-PQ builder for CPU.
+    index_dir: directory containing 'embedding' folder
+    """
+    embedding_dir = os.path.join(index_dir, "embedding")
+    all_files = sorted([f for f in os.listdir(embedding_dir) if f.endswith(".npy")])
+    
+    print("Sampling embeddings for training...")
+    sample_list = []
+    for fname in all_files:
+        vecs = np.load(os.path.join(embedding_dir, fname)).astype("float32")
+        sample_list.append(vecs)
+        if sum(len(s) for s in sample_list) > train_sample_size * 2:
+            break
+    train_embeddings = np.vstack(sample_list)
+    if len(train_embeddings) > train_sample_size:
+        idx = np.random.choice(len(train_embeddings), train_sample_size, replace=False)
+        train_embeddings = train_embeddings[idx]
+
+    quantizer = faiss.IndexFlatIP(h_dim)  # coarse quantizer
+    index = faiss.IndexIVFPQ(quantizer, h_dim, nlist, m, nbits)
+    
+    print("Training index...")
+    index.train(train_embeddings)
+    print("Training done!")
+
+    metadata_path = os.path.join(index_dir, "metadatas.jsonl")
+    with open(metadata_path, 'w') as f:
+        f.write("")
+    with open(metadata_path, "w") as fmeta:
+        for fname in tqdm.tqdm(all_files):
+            curr_embed = np.load(os.path.join(embedding_dir, fname)).astype("float32")
+            # add in smaller batches
+            for start in range(0, len(curr_embed), batch_size):
+                end = start + batch_size
+                index.add(curr_embed[start:end])
+            
+            # save metadata
+            fmeta.write("\n".join([
+                json.dumps({'index': i, 'source': fname.replace(".npy", "")})
+                for i in range(len(curr_embed))
+            ]) + "\n")
+
+    index_path = os.path.join(index_dir, "faiss.index")
+    faiss.write_index(index, index_path)
+    print(f"Index saved to {index_path}")
+
+    return index
+
+
+def construct_index(index_dir, model_name, h_dim=768, HNSW=False, M=32, nlist = 4096, sv = 64, nbits = 8):
 
     with open(os.path.join(index_dir, "metadatas.jsonl"), 'w') as f:
         f.write("")
@@ -114,7 +254,9 @@ def construct_index(index_dir, model_name, h_dim=768, HNSW=False, M=32):
         if "specter" in model_name.lower():
             index = faiss.IndexFlatL2(h_dim)
         else:
-            index = faiss.IndexFlatIP(h_dim)
+            #index = faiss.IndexFlatIP(h_dim)
+            quantizer = faiss.IndexFlatIP(dim)
+            index = faiss.IndexIVFPQ(quantizer, h_dim, nlist, sv, nbits)
 
     for fname in tqdm.tqdm(sorted(os.listdir(os.path.join(index_dir, "embedding")))):
         curr_embed = np.load(os.path.join(index_dir, "embedding", fname))
@@ -122,13 +264,16 @@ def construct_index(index_dir, model_name, h_dim=768, HNSW=False, M=32):
         with open(os.path.join(index_dir, "metadatas.jsonl"), 'a+') as f:
             f.write("\n".join([json.dumps({'index': i, 'source': fname.replace(".npy", "")}) for i in range(len(curr_embed))]) + '\n')
 
+    print("training starts")
+    index.train(train_embeddings)
+    print("training ends")
+
     faiss.write_index(index, os.path.join(index_dir, "faiss.index"))
     return index
 
-
 class Retriever: 
 
-    def __init__(self, retriever_name="ncbi/MedCPT-Query-Encoder", corpus_name="textbooks", db_dir="./corpus", HNSW=False, **kwarg):
+    def __init__(self, retriever_name="ncbi/MedCPT-Query-Encoder", corpus_name="textbooks", db_dir="./newcorpus", HNSW=False, **kwarg):
         self.retriever_name = retriever_name
         self.corpus_name = corpus_name
 
@@ -192,7 +337,7 @@ class Retriever:
                     h_dim = embed(chunk_dir=self.chunk_dir, index_dir=self.index_dir, model_name=self.retriever_name.replace("Query-Encoder", "Article-Encoder"), **kwarg)
 
                 print("[In progress] Embedding finished! The dimension of the embeddings is {:d}.".format(h_dim))
-                self.index = construct_index(index_dir=self.index_dir, model_name=self.retriever_name.replace("Query-Encoder", "Article-Encoder"), h_dim=h_dim, HNSW=HNSW)
+                self.index = construct_ivfpq(index_dir=self.index_dir, model_name=self.retriever_name.replace("Query-Encoder", "Article-Encoder"), h_dim=h_dim, HNSW=HNSW)
                 print("[Finished] Corpus indexing finished!")
                 self.metadatas = [json.loads(line) for line in open(os.path.join(self.index_dir, "metadatas.jsonl")).read().strip().split('\n')]            
             if "contriever" in self.retriever_name.lower():
@@ -214,11 +359,16 @@ class Retriever:
         else:
             with torch.no_grad():
                 query_embed = self.embedding_function.encode(question, **kwarg)
-            res_ = self.index.search(query_embed, k=k)
-            ids = ['_'.join([self.metadatas[i]["source"], str(self.metadatas[i]["index"])]) for i in res_[1][0]]
-            indices = [self.metadatas[i] for i in res_[1][0]]
+            #res_ = self.index.search(query_embed, k=k)
+            res_ = self.index.query(query_embeddings = query_embed, n_results=k)
+            #print(res_)
+            #ids = ['_'.join([self.metadatas[i]["source"], str(self.metadatas[i]["index"])]) for i in res_[1][0]]
+            ids = res_['ids'][0]
+            #print(ids)
+            indices = [i for i in res_['metadatas'][0]]
+            print(indices)
 
-        scores = res_[0][0].tolist()
+        scores = res_['distances'][0]
         
         if id_only:
             return [{"id":i} for i in ids], scores
@@ -234,7 +384,7 @@ class Retriever:
 
 class RetrievalSystem:
 
-    def __init__(self, retriever_name="MedCPT", corpus_name="Textbooks", db_dir="./corpus", HNSW=False, cache=False):
+    def __init__(self, retriever_name="MedCPT", corpus_name="Textbooks", db_dir="./newcorpus", HNSW=False, cache=False):
         self.retriever_name = retriever_name
         self.corpus_name = corpus_name
         assert self.corpus_name in corpus_names
@@ -279,7 +429,7 @@ class RetrievalSystem:
             texts = self.docExt.extract(texts)
         return texts, scores
 
-    def merge(self, texts, scores, k=32, rrf_k=100):
+    def merge(self, texts, scores, k=8, rrf_k=60):
         '''
             Merge the texts and scores from different retrievers
         '''
@@ -323,7 +473,7 @@ class RetrievalSystem:
 
 class DocExtracter:
     
-    def __init__(self, db_dir="./corpus", cache=False, corpus_name="MedCorp"):
+    def __init__(self, db_dir="./newcorpus", cache=False, corpus_name="MedCorp"):
         self.db_dir = db_dir
         self.cache = cache
         print("Initializing the document extracter...")

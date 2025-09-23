@@ -6,7 +6,7 @@ import torch
 import time
 import argparse
 import transformers
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import openai
 from transformers import StoppingCriteria, StoppingCriteriaList
 import tiktoken
@@ -42,7 +42,7 @@ else:
 
 class MedRAG:
 
-    def __init__(self, llm_name="OpenAI/gpt-3.5-turbo-16k", rag=True, follow_up=False, retriever_name="MedCPT", corpus_name="Textbooks", db_dir="./corpus", cache_dir=None, corpus_cache=False, HNSW=False):
+    def __init__(self, llm_name="OpenAI/gpt-3.5-turbo-16k", rag=True, follow_up=False, retriever_name="MedCPT", corpus_name="Textbooks", db_dir="./newcorpus", cache_dir=None, corpus_cache=False, HNSW=False):
         self.llm_name = llm_name
         self.rag = rag
         self.retriever_name = retriever_name
@@ -109,14 +109,28 @@ class MedRAG:
                 self.tokenizer.chat_template = open('./templates/pmc_llama.jinja').read().replace('    ', '').replace('\n', '')
                 self.max_length = 2048
                 self.context_length = 1024
+            print("here")
+            '''
             self.model = transformers.pipeline(
                 "text-generation",
                 model=self.llm_name,
                 # torch_dtype=torch.float16,
-                torch_dtype=torch.bfloat16,
+                torch_dtype=torch.float16,
                 device_map="auto",
-                model_kwargs={"cache_dir":self.cache_dir},
+                model_kwargs={"cache_dir":self.cache_dir, "low_cpu_mem_usage": True},
             )
+            '''
+            model = AutoModelForCausalLM.from_pretrained(
+                    self.llm_name,
+                    load_in_4bit=True,
+                    #device_map="auto",
+                    cache_dir=self.cache_dir,
+                    #low_cpu_mem_usage=True,
+                    )
+            self.model = pipeline("text-generation", model=model, tokenizer=self.tokenizer)
+
+            print("here2")
+            
         
         self.follow_up = follow_up
         if self.rag and self.follow_up:
@@ -160,6 +174,7 @@ class MedRAG:
                     eos_token_id=[self.tokenizer.eos_token_id, self.tokenizer.convert_tokens_to_ids("<|eot_id|>")],
                     pad_token_id=self.tokenizer.eos_token_id,
                     max_length=self.max_length,
+                    #max_new_tokens=512,
                     truncation=True,
                     stopping_criteria=stopping_criteria,
                     **kwargs
@@ -173,13 +188,14 @@ class MedRAG:
                     max_length=self.max_length,
                     truncation=True,
                     stopping_criteria=stopping_criteria,
+                    use_cache=True,
                     **kwargs
                 )
             # ans = response[0]["generated_text"]
             ans = response[0]["generated_text"][len(prompt):]
         return ans
 
-    def medrag_answer(self, question, options=None, k=32, rrf_k=100, save_dir = None, snippets=None, snippets_ids=None, **kwargs):
+    def medrag_answer(self, question, options=None, k=8, rrf_k=60, save_dir = None,file_prefix="", snippets=None, snippets_ids=None, **kwargs):
         '''
         question (str): question to be answered
         options (Dict[str, str]): options to be chosen from
@@ -189,7 +205,7 @@ class MedRAG:
         snippets (List[Dict]): list of snippets to be used
         snippets_ids (List[Dict]): list of snippet ids to be used
         '''
-
+        print(save_dir)
         if options is not None:
             options = '\n'.join([key+". "+options[key] for key in sorted(options.keys())])
         else:
@@ -247,14 +263,14 @@ class MedRAG:
                 answers.append(re.sub("\s+", " ", ans))
         
         if save_dir is not None:
-            with open(os.path.join(save_dir, "snippets.json"), 'w') as f:
+            with open(os.path.join(save_dir, f"{file_prefix}_snippets.json"), 'w') as f:
                 json.dump(retrieved_snippets, f, indent=4)
-            with open(os.path.join(save_dir, "response.json"), 'w') as f:
+            with open(os.path.join(save_dir, f"{file_prefix}_response.json"), 'w') as f:
                 json.dump(answers, f, indent=4)
         
         return answers[0] if len(answers)==1 else answers, retrieved_snippets, scores
 
-    def i_medrag_answer(self, question, options=None, k=32, rrf_k=100, save_path = None, n_rounds=4, n_queries=3, qa_cache_path=None, **kwargs):
+    def i_medrag_answer(self, question, options=None, k=8, rrf_k=60, save_path = None, n_rounds=4, n_queries=3, qa_cache_path=None, **kwargs):
         if options is not None:
             options = '\n'.join([key+". "+options[key] for key in sorted(options.keys())])
         else:
