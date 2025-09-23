@@ -58,7 +58,7 @@ def run_experiments(
             rag=True,
             retriever_name=retriever_name,
             corpus_name=corpus_name,
-            corpus_cache=True,
+            corpus_cache=False,
         )
         save_dir = os.path.join("../prediction", ds_str, f"rag_{k}", llm_name, corpus_name, retriever_name)
     else:
