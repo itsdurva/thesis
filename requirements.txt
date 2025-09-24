@@ -7,3 +7,4 @@ sentence-transformers
 pyserini
 tiktoken
 datasets==2.16.1
+bitsandbytes

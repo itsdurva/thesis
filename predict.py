@@ -3,7 +3,7 @@ from src.medrag import MedRAG
 from src.mirage import *
 import os
 import argparse
-
+ds_str = ""
 def evaluate(
     dataset_name,
     medrag,
@@ -46,29 +46,29 @@ def run_experiments(
     retriever_name,
     method,
     qadatasets,
+    size
 ):
     benchmark = json.load(open("benchmark.json"))
     answer_list = ["A", "B", "C", "D"]
     answer2idx = {ans: i for i, ans in enumerate(answer_list)}
     results = {}
 
-    if (method.lower() == "rag"):
-        medrag = MedRAG(
+    for qads in qadatasets:
+        ds_str = qads
+        if (method.lower() == "rag"):
+            medrag = MedRAG(
             llm_name=llm_name,
             rag=True,
             retriever_name=retriever_name,
             corpus_name=corpus_name,
-            corpus_cache=False,
-        )
-        save_dir = os.path.join("../prediction", ds_str, f"rag_{k}", llm_name, corpus_name, retriever_name)
-    else:
-        medrag = MedRAG(llm_name=llm_name, rag=False)
-        save_dir = os.path.join("../prediction", ds_str, "cot", llm_name)
-    print("saving @", save_dir)
-    os.makedirs(save_dir, exist_ok=True)
+            corpus_cache=False,)
+            save_dir = os.path.join("../prediction", ds_str, f"rag_{k}", llm_name, corpus_name, retriever_name, size)
+        else:
+            medrag = MedRAG(llm_name=llm_name, rag=False)
+            save_dir = os.path.join("../prediction", ds_str, "cot", llm_name)
+        print("saving @", save_dir)
+        os.makedirs(save_dir, exist_ok=True)
 
-    for qads in qadatasets:
-        ds_str = qads
         qadataset = MirageQA(qads)
 
         multi_choice_acc, multi_choice_std = evaluate(
@@ -92,7 +92,7 @@ if __name__ == "__main__":
                         help="LLM model name")
     parser.add_argument("--k", type=int, default=8,
                         help="Number of retrieved documents")
-    parser.add_argument("--corpus_name", type=str, default="PubMed",
+    parser.add_argument("--corpus_name", type=str, default="StatPearls",
                         help="Corpus to use for retrieval")
     parser.add_argument("--retriever_name", type=str, default="Contriever",
                         help="Retriever model name")
@@ -101,6 +101,7 @@ if __name__ == "__main__":
                         help="Method to use (rag or cot)")
     parser.add_argument("--qadatasets", type=str, nargs="+", default=["bioasq", "pubmedqa"],
                         help="List of QA datasets")
+    parser.add_argument("--size", type=str, choices=['all', '10k'], default = '10k', help="Size of faiss directory")
 
     args = parser.parse_args()
 
@@ -111,4 +112,5 @@ if __name__ == "__main__":
         retriever_name=args.retriever_name,
         method=args.method,
         qadatasets=args.qadatasets,
+        size = args.size
     )
