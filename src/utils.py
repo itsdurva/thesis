@@ -345,9 +345,12 @@ class Retriever:
                 os.system("python -m pyserini.index.lucene --collection JsonCollection --input {:s} --index {:s} --generator DefaultLuceneDocumentGenerator --threads 16".format(self.chunk_dir, self.index_dir))
                 self.index = LuceneSearcher(os.path.join(self.index_dir))
         else:
-            if os.path.exists(os.path.join(self.index_dir, "faiss.index")):
+            if faiss_size == "all" and os.path.exists(os.path.join(self.index_dir, "faiss.index")):
                 self.index = faiss.read_index(os.path.join(self.index_dir, "faiss.index"))
                 self.metadatas = [json.loads(line) for line in open(os.path.join(self.index_dir, "metadatas.jsonl")).read().strip().split('\n')]
+            elif faiss_size == "10k" and os.path.exists(os.path.join(self.index_dir, "10k.index")):
+                self.index = faiss.read_index(os.path.join(self.index_dir, "10k.index"))
+                self.metadatas = [json.loads(line) for line in open(os.path.join(self.index_dir, "10k.jsonl")).read().strip().split('\n')]
             else:
                 print("[In progress] Embedding the {:s} corpus with the {:s} retriever...".format(self.corpus_name, self.retriever_name.replace("Query-Encoder", "Article-Encoder")))
                 if self.corpus_name in ["textbooks", "pubmed", "wikipedia"] and self.retriever_name in ["allenai/specter", "facebook/contriever", "ncbi/MedCPT-Query-Encoder"] and not os.path.exists(os.path.join(self.index_dir, "embedding")):
