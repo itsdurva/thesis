@@ -31,14 +31,14 @@ clientapp = "src.fedrag.client_app:app"
 server-qa-datasets = "pubmedqa|bioasq"
 # Force to only evaluate the first 10 questions from each benchmark
 # dataset, if this value is not set, then evaluate all questions
-server-qa-num = 1
+# server-qa-num = 1
 # Pass corpus as "StatPearls|Textbooks", the corpus will be assigned
 # to each client participating in the federation in a Round-Robin fashion
 # The supported corpora are:
 # PubMed (23.9M docs), StatPearls (9.3k docs), Textbooks (18 docs), Wikipedia (6.5M docs)
 # you can pass them as follows: "pubmed|statpearls|textbooks|wikipedia"
 # the vertical bar separates the different corpus
-clients-corpus-names = "textbooks"
+clients-corpus-names = "pubmed"
 # The value of the Reciprocal Rank Fusion. The value will be used
 # to merge multiple documents together at the server-side
 # If the value is not set then only the retrieval scores are considered

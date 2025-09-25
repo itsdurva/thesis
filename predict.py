@@ -92,7 +92,7 @@ if __name__ == "__main__":
                         help="LLM model name")
     parser.add_argument("--k", type=int, default=8,
                         help="Number of retrieved documents")
-    parser.add_argument("--corpus_names", type=str, nargs="+", default=["Textbooks"],
+    parser.add_argument("--corpus_names", type=str, nargs="+", default=["PubMed", "Wikipedia"],
                         help="Corpus to use for retrieval")
     parser.add_argument("--retriever_name", type=str, default="Contriever",
                         help="Retriever model name")
