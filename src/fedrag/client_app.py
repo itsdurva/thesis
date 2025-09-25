@@ -8,7 +8,6 @@ from fedrag.retriever import Retriever
 
 # Flower ClientApp
 app = ClientApp()
-print("init init")
     
 
 @app.query()

@@ -10,6 +10,7 @@ import numpy as np
 import chromadb
 from chromadb import Client
 from chromadb.config import Settings
+from collections import defaultdict
 
 corpus_names = {
     "PubMed": ["pubmed"],
@@ -121,7 +122,6 @@ def construct_chromadb_with_faiss(index_dir, model_name, h_dim=768, HNSW=False, 
     # Collection name
     temp = index_dir.strip("/").split("/")
     collection_name = f"{temp[-4]}_{temp[-1]}"
-    # print(collection_name)
 
     # Create or get collection
     if collection_name in [c.name for c in chroma_client.list_collections()]:
@@ -238,11 +238,21 @@ def construct_ivfpq(index_dir,
     return index
 
 
-def construct_index(index_dir, model_name, h_dim=768, HNSW=False, M=32, nlist = 4096, sv = 64, nbits = 8):
-
-    with open(os.path.join(index_dir, "metadatas.jsonl"), 'w') as f:
-        f.write("")
+def construct_10k(index_dir, corpus_name, model_name, h_dim=768, HNSW=False, M=32, nlist = 4096, sv = 64, nbits = 8, configs_dir = '10k'):
     
+    dataset_paths = [ f.path for f in os.scandir(os.path.abspath(configs_dir)) if f.is_dir() ]
+    result = set()
+    for index, dataset_path in enumerate(dataset_paths):
+        for fname in tqdm.tqdm(os.listdir(os.path.join(dataset_path, corpus_name, model_name, "snippets")), desc = f"reading snippets for {corpus_name} in {dataset_path}"):
+            fname = os.path.join(dataset_path, corpus_name, model_name, "snippets", fname)
+            with open(fname, 'r') as file:
+                data = json.load(file)
+                result.update([item["id"] for item in data])
+    print(f"receieved {len(result)} snippets from datasets")
+
+    with open(os.path.join(index_dir, "10k.jsonl"), 'w') as f:
+        f.write("")
+
     if HNSW:
         M = M
         if "specter" in model_name.lower():
@@ -254,9 +264,48 @@ def construct_index(index_dir, model_name, h_dim=768, HNSW=False, M=32, nlist = 
         if "specter" in model_name.lower():
             index = faiss.IndexFlatL2(h_dim)
         else:
-            #index = faiss.IndexFlatIP(h_dim)
-            quantizer = faiss.IndexFlatIP(dim)
-            index = faiss.IndexIVFPQ(quantizer, h_dim, nlist, sv, nbits)
+            index = faiss.IndexFlatIP(h_dim)
+            #quantizer = faiss.IndexFlatIP(dim)
+            #index = faiss.IndexIVFPQ(quantizer, h_dim, nlist, sv, nbits)
+
+    for fname in tqdm.tqdm(sorted(os.listdir(os.path.join(index_dir, "embedding")))):
+        metadata_list = []
+        curr_embed = np.load(os.path.join(index_dir, "embedding", fname))
+
+        for i in range(len(curr_embed)):
+            if "_".join([fname.replace(".npy", ""), str(i)]) in result:
+                index.add(curr_embed[i].reshape(1, -1))
+                metadata_list.append(json.dumps({'index': i, 'source': fname.replace(".npy", "")}))
+        
+        with open(os.path.join(index_dir, "10k.jsonl"), 'a+') as f:
+            f.write("\n".join(metadata_list) + "\n")
+        
+        # with open(os.path.join(index_dir, "10k.jsonl"), 'a+') as f:
+        #     f.write("\n".join([json.dumps({'index': i, 'source': fname.replace(".npy", "")}) for i in range(len(curr_embed))]) + '\n')
+
+    faiss.write_index(index, os.path.join(index_dir, "10k.index"))
+    return index
+
+
+def construct_index(index_dir, model_name, h_dim=768, HNSW=False, M=32, nlist = 4096, sv = 64, nbits = 8):
+
+    with open(os.path.join(index_dir, "metadatas.jsonl"), 'w') as f:
+        f.write("")
+
+    if HNSW:
+        M = M
+        if "specter" in model_name.lower():
+            index = faiss.IndexHNSWFlat(h_dim, M)
+        else:
+            index = faiss.IndexHNSWFlat(h_dim, M)
+            index.metric_type = faiss.METRIC_INNER_PRODUCT
+    else:
+        if "specter" in model_name.lower():
+            index = faiss.IndexFlatL2(h_dim)
+        else:
+            index = faiss.IndexFlatIP(h_dim)
+            #quantizer = faiss.IndexFlatIP(dim)
+            #index = faiss.IndexIVFPQ(quantizer, h_dim, nlist, sv, nbits)
 
     for fname in tqdm.tqdm(sorted(os.listdir(os.path.join(index_dir, "embedding")))):
         curr_embed = np.load(os.path.join(index_dir, "embedding", fname))
@@ -264,26 +313,21 @@ def construct_index(index_dir, model_name, h_dim=768, HNSW=False, M=32, nlist = 
         with open(os.path.join(index_dir, "metadatas.jsonl"), 'a+') as f:
             f.write("\n".join([json.dumps({'index': i, 'source': fname.replace(".npy", "")}) for i in range(len(curr_embed))]) + '\n')
 
-    print("training starts")
-    index.train(train_embeddings)
-    print("training ends")
-
     faiss.write_index(index, os.path.join(index_dir, "faiss.index"))
     return index
 
 class Retriever: 
 
-    def __init__(self, retriever_name="ncbi/MedCPT-Query-Encoder", corpus_name="textbooks", db_dir="./newcorpus", HNSW=False, **kwarg):
+    def __init__(self, retriever_name="ncbi/MedCPT-Query-Encoder", corpus_name="textbooks", db_dir="./corpus", HNSW=False, faiss_size = '10k', **kwarg):
         self.retriever_name = retriever_name
         self.corpus_name = corpus_name
-
         self.db_dir = db_dir
         if not os.path.exists(self.db_dir):
             os.makedirs(self.db_dir)
         self.chunk_dir = os.path.join(self.db_dir, self.corpus_name, "chunk")
         if not os.path.exists(self.chunk_dir):
             print("Cloning the {:s} corpus from Huggingface...".format(self.corpus_name))
-            os.system("git clone https://huggingface.co/datasets/MedRAG/{:s} {:s}".format(corpus_name, os.path.join(self.db_dir, self.corpus_name)))
+            os.system("git lfs clone https://huggingface.co/datasets/MedRAG/{:s} {:s}".format(corpus_name, os.path.join(self.db_dir, self.corpus_name)))
             if self.corpus_name == "statpearls":
                 print("Downloading the statpearls corpus from NCBI bookshelf...")
                 os.system("wget https://ftp.ncbi.nlm.nih.gov/pub/litarch/3d/12/statpearls_NBK430685.tar.gz -P {:s}".format(os.path.join(self.db_dir, self.corpus_name)))
@@ -337,9 +381,16 @@ class Retriever:
                     h_dim = embed(chunk_dir=self.chunk_dir, index_dir=self.index_dir, model_name=self.retriever_name.replace("Query-Encoder", "Article-Encoder"), **kwarg)
 
                 print("[In progress] Embedding finished! The dimension of the embeddings is {:d}.".format(h_dim))
-                self.index = construct_ivfpq(index_dir=self.index_dir, model_name=self.retriever_name.replace("Query-Encoder", "Article-Encoder"), h_dim=h_dim, HNSW=HNSW)
-                print("[Finished] Corpus indexing finished!")
-                self.metadatas = [json.loads(line) for line in open(os.path.join(self.index_dir, "metadatas.jsonl")).read().strip().split('\n')]            
+                if faiss_size == '10k':
+                    self.index = construct_10k(index_dir=self.index_dir, corpus_name = self.corpus_name, model_name=self.retriever_name.replace("Query-Encoder", "Article-Encoder"), h_dim=h_dim, HNSW=HNSW)
+                    print("[Finished] Corpus indexing finished!")
+                    #print(os.path.join(self.index_dir, "10k.jsonl"))
+                    #print([line for line in open(os.path.join(self.index_dir, "10k.jsonl")).read().strip().split('\n')])
+                    self.metadatas = self.metadatas = [json.loads(line) for line in open(os.path.join(self.index_dir, "10k.jsonl")).read().strip().split('\n')]            
+                else:
+                    self.index = construct_index(index_dir=self.index_dir, model_name=self.retriever_name.replace("Query-Encoder", "Article-Encoder"), h_dim=h_dim, HNSW=HNSW)
+                    print("[Finished] Corpus indexing finished!")
+                    self.metadatas = [json.loads(line) for line in open(os.path.join(self.index_dir, "metadatas.jsonl")).read().strip().split('\n')]
             if "contriever" in self.retriever_name.lower():
                 self.embedding_function = SentenceTransformer(self.retriever_name, device="cuda" if torch.cuda.is_available() else "cpu")
             else:
@@ -359,16 +410,14 @@ class Retriever:
         else:
             with torch.no_grad():
                 query_embed = self.embedding_function.encode(question, **kwarg)
-            #res_ = self.index.search(query_embed, k=k)
-            res_ = self.index.query(query_embeddings = query_embed, n_results=k)
-            #print(res_)
-            #ids = ['_'.join([self.metadatas[i]["source"], str(self.metadatas[i]["index"])]) for i in res_[1][0]]
-            ids = res_['ids'][0]
-            #print(ids)
-            indices = [i for i in res_['metadatas'][0]]
-            print(indices)
+            res_ = self.index.search(query_embed, k=k)
+            #res_ = self.index.query(query_embeddings = query_embed, n_results=k)
+            ids = ['_'.join([self.metadatas[i]["source"], str(self.metadatas[i]["index"])]) for i in res_[1][0]]
+            #ids = res_['ids'][0]
+            #indices = [i for i in res_['metadatas'][0]]
+            indices = [self.metadatas[i] for i in res_[1][0]]
 
-        scores = res_['distances'][0]
+        scores = res_[0][0].tolist()
         
         if id_only:
             return [{"id":i} for i in ids], scores
@@ -384,7 +433,7 @@ class Retriever:
 
 class RetrievalSystem:
 
-    def __init__(self, retriever_name="MedCPT", corpus_name="Textbooks", db_dir="./newcorpus", HNSW=False, cache=False):
+    def __init__(self, retriever_name="MedCPT", corpus_name="Textbooks", db_dir="./corpus", HNSW=False, faiss_size = '10k', cache=False):
         self.retriever_name = retriever_name
         self.corpus_name = corpus_name
         assert self.corpus_name in corpus_names
@@ -393,7 +442,7 @@ class RetrievalSystem:
         for retriever in retriever_names[self.retriever_name]:
             self.retrievers.append([])
             for corpus in corpus_names[self.corpus_name]:
-                self.retrievers[-1].append(Retriever(retriever, corpus, db_dir, HNSW=HNSW))
+                self.retrievers[-1].append(Retriever(retriever, corpus, db_dir, HNSW=HNSW, faiss_size = faiss_size))
         self.cache = cache
         if self.cache:
             self.docExt = DocExtracter(cache=True, corpus_name=self.corpus_name, db_dir=db_dir)
@@ -473,14 +522,15 @@ class RetrievalSystem:
 
 class DocExtracter:
     
-    def __init__(self, db_dir="./newcorpus", cache=False, corpus_name="MedCorp"):
+    def __init__(self, db_dir="./corpus", cache=False, corpus_name="MedCorp"):
         self.db_dir = db_dir
         self.cache = cache
         print("Initializing the document extracter...")
         for corpus in corpus_names[corpus_name]:
             if not os.path.exists(os.path.join(self.db_dir, corpus, "chunk")):
                 print("Cloning the {:s} corpus from Huggingface...".format(corpus))
-                os.system("git clone https://huggingface.co/datasets/MedRAG/{:s} {:s}".format(corpus, os.path.join(self.db_dir, corpus)))
+                os.system("git lfs install")
+                os.system("git lfs clone https://huggingface.co/datasets/MedRAG/{:s} {:s}".format(corpus, os.path.join(self.db_dir, corpus)))
                 if corpus == "statpearls":
                     print("Downloading the statpearls corpus from NCBI bookshelf...")
                     os.system("wget https://ftp.ncbi.nlm.nih.gov/pub/litarch/3d/12/statpearls_NBK430685.tar.gz -P {:s}".format(os.path.join(self.db_dir, corpus)))

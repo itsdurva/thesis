@@ -19,8 +19,7 @@ from sentence_transformers import util as st_util
 
 DIR_PATH = os.path.dirname(os.path.realpath(__file__))
 FAISS_DEFAULT_CONFIG = os.path.join(DIR_PATH, "retriever.yaml")
-CORPUS_DIR = os.path.join(DIR_PATH, "../../newcorpus")
-print(CORPUS_DIR)
+CORPUS_DIR = os.path.join(DIR_PATH, "../../corpus")
 
 class Retriever:
 
@@ -31,7 +30,6 @@ class Retriever:
             self.config = yaml.safe_load(open(config_file, "r"))
         self.device = st_util.get_device_name()
         # self.device = "cuda"
-        # print("using device in line 33, retriever.py", self.device)
         # load the embedding model and define the embeddings dimensions
         # for the device placement of the SentenceTransformers model we resort
         # to use the device name returned by `sentence_transformers.util.get_device_name()`
@@ -45,7 +43,6 @@ class Retriever:
         dataset_dir = os.path.join(CORPUS_DIR, f"{dataset_name}")
         index_path = os.path.join(dataset_dir, f"{index_name}.index")
         doc_ids_path = os.path.join(dataset_dir, "all_doc_ids.npy")
-        print(dataset_dir)
         try:
             # erase previous files whenever
             # index builder is called
@@ -68,7 +65,6 @@ class Retriever:
             batch_content, batch_ids = [], []
             with open(filename, "r", encoding="utf-8") as infile:
                 for line in infile:
-                    # print(line)
                     doc = json.loads(line)
                     doc_id = doc.get("id", "")
                     content = doc.get("content", "")
@@ -132,7 +128,6 @@ class Retriever:
         index_dir = os.path.join(CORPUS_DIR, qa_dataset_name, dataset_name, self.config["embedding_model"], "index")
         index_path = os.path.join(index_dir, f"faiss.index")
         doc_ids_path = os.path.join(index_dir, f"all_doc_ids.npy")
-        # print(index_path, doc_ids_path)
         if not os.path.exists(doc_ids_path) or not os.path.exists(index_path):
             raise RuntimeError(f"FAISS index {index_path} is not built yet.")
 
@@ -146,7 +141,6 @@ class Retriever:
         if len(query_embeddings.shape) == 1:  # Single query case
             query_embeddings = np.expand_dims(query_embeddings, 0)
     
-        # print(query_embeddings.shape)
 
         # 3. Search the index
         # CAUTION: since our FAISS index is built with
@@ -154,7 +148,6 @@ class Retriever:
         # lower the score the better, since L2 Distance
         # measures dissimilarity.
         doc_scores, doc_idx = index.search(query_embeddings, knn)
-        # print(doc_scores.shape, doc_idx.shape)
         # 4. Retrieve the relevant document IDs
 
         # 5. Prepare and return the results
@@ -165,12 +158,9 @@ class Retriever:
             retrieved_doc_scores = doc_scores[q]
             q_indices = doc_idx[q]
             retrieved_doc_ids = doc_ids[q_indices] 
-            #print(retrieved_doc_scores.shape, retrieved_doc_ids.shape)
-            #print(f"for {q}", retrieved_doc_scores)
             for i, (doc_id, doc_score) in enumerate(zip(retrieved_doc_ids, retrieved_doc_scores)):
                 doc_pref_suf = doc_id.split("_")
                 doc_name, snippet_idx = "_".join(doc_pref_suf[:-1]), int(doc_pref_suf[-1])
-                #print(doc_name, snippet_idx)
                 full_file = os.path.join(chunk_dir, doc_name + ".jsonl")
                 loaded_snippet = json.loads(
                     open(full_file).read().strip().split("\n")[snippet_idx]

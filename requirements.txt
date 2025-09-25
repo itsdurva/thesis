@@ -8,3 +8,4 @@ pyserini
 tiktoken
 datasets==2.16.1
 bitsandbytes
+python-rocksdb

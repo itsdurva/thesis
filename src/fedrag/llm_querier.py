@@ -87,7 +87,6 @@ class LLMQuerier:
     def __extract_answer(cls, generated_text, original_prompt):
         # Extract only the new generated text
         response = generated_text[len(original_prompt) :].strip()
-        #print(response)
         # Find first occurrence of A-D (case-insensitive)
         option = re.search(r"\b([A-Da-d])\b", response)
         if option:

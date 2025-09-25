@@ -92,7 +92,7 @@ if __name__ == "__main__":
                         help="LLM model name")
     parser.add_argument("--k", type=int, default=8,
                         help="Number of retrieved documents")
-    parser.add_argument("--corpus_name", type=str, default="StatPearls",
+    parser.add_argument("--corpus_names", type=str, nargs="+", default=["Textbooks"],
                         help="Corpus to use for retrieval")
     parser.add_argument("--retriever_name", type=str, default="Contriever",
                         help="Retriever model name")
@@ -105,12 +105,14 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    run_experiments(
-        llm_name=args.llm_name,
-        k=args.k,
-        corpus_name=args.corpus_name,
-        retriever_name=args.retriever_name,
-        method=args.method,
-        qadatasets=args.qadatasets,
-        size = args.size
-    )
+    for corpus_name in args.corpus_names:
+        print(f"for {corpus_name}")
+        run_experiments(
+            llm_name=args.llm_name,
+            k=args.k,
+            corpus_name=corpus_name,
+            retriever_name=args.retriever_name,
+            method=args.method,
+            qadatasets=args.qadatasets,
+            size = args.size
+        )

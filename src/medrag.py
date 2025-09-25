@@ -11,6 +11,7 @@ import openai
 from transformers import StoppingCriteria, StoppingCriteriaList
 import tiktoken
 import sys
+from transformers import BitsAndBytesConfig
 sys.path.append("src")
 from utils import RetrievalSystem, DocExtracter
 from template import *
@@ -42,7 +43,7 @@ else:
 
 class MedRAG:
 
-    def __init__(self, llm_name="OpenAI/gpt-3.5-turbo-16k", rag=True, follow_up=False, retriever_name="MedCPT", corpus_name="Textbooks", db_dir="./newcorpus", cache_dir=None, corpus_cache=False, HNSW=False):
+    def __init__(self, llm_name="OpenAI/gpt-3.5-turbo-16k", rag=True, follow_up=False, retriever_name="MedCPT", corpus_name="Textbooks", db_dir="./corpus", faiss_size = '10k', cache_dir=None, corpus_cache=False, HNSW=False):
         self.llm_name = llm_name
         self.rag = rag
         self.retriever_name = retriever_name
@@ -51,7 +52,7 @@ class MedRAG:
         self.cache_dir = cache_dir
         self.docExt = None
         if rag:
-            self.retrieval_system = RetrievalSystem(self.retriever_name, self.corpus_name, self.db_dir, cache=corpus_cache, HNSW=HNSW)
+            self.retrieval_system = RetrievalSystem(self.retriever_name, self.corpus_name, self.db_dir, cache=corpus_cache, HNSW=HNSW, faiss_size = faiss_size)
         else:
             self.retrieval_system = None
         self.templates = {"cot_system": general_cot_system, "cot_prompt": general_cot,
@@ -109,27 +110,20 @@ class MedRAG:
                 self.tokenizer.chat_template = open('./templates/pmc_llama.jinja').read().replace('    ', '').replace('\n', '')
                 self.max_length = 2048
                 self.context_length = 1024
-            print("here")
-            '''
-            self.model = transformers.pipeline(
-                "text-generation",
-                model=self.llm_name,
-                # torch_dtype=torch.float16,
-                torch_dtype=torch.float16,
-                device_map="auto",
-                model_kwargs={"cache_dir":self.cache_dir, "low_cpu_mem_usage": True},
-            )
-            '''
+            bnb_config = BitsAndBytesConfig(
+                            load_in_4bit=True,   # replaces load_in_4bit=True
+                            bnb_4bit_quant_type="nf4",  # better quantization
+                            bnb_4bit_compute_dtype="bfloat16",  # safer compute type
+                            bnb_4bit_use_double_quant=True,
+                            )
+
             model = AutoModelForCausalLM.from_pretrained(
                     self.llm_name,
-                    load_in_4bit=True,
-                    #device_map="auto",
+                    quantization_config=bnb_config,
+                    device_map="auto",
                     cache_dir=self.cache_dir,
-                    #low_cpu_mem_usage=True,
                     )
             self.model = pipeline("text-generation", model=model, tokenizer=self.tokenizer)
-
-            print("here2")
             
         
         self.follow_up = follow_up
@@ -205,7 +199,6 @@ class MedRAG:
         snippets (List[Dict]): list of snippets to be used
         snippets_ids (List[Dict]): list of snippet ids to be used
         '''
-        print(save_dir)
         if options is not None:
             options = '\n'.join([key+". "+options[key] for key in sorted(options.keys())])
         else:

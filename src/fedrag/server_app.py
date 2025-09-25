@@ -183,18 +183,15 @@ def main(grid: Grid, context: Context) -> None:
     # load all questions from benchmark.json
     mirage_file = os.path.join(os.path.dirname(__file__), "../../benchmark.json")
     datasets = {key: MirageQA(key, mirage_file) for key in qa_datasets}
-    print("datasets in question", datasets.keys())
 
     llm_querier = LLMQuerier(model_name, use_gpu)
     expected_answers, predicted_answers, question_times, unanswered_questions = (defaultdict(list),defaultdict(list),defaultdict(list),defaultdict(int),)
     
     for dataset_name in qa_datasets:
         q_idx = 0
-        # print("Evaluating Dataset: [{:s}] ".format(dataset_name))
         questions_in_batch = []
         if number_of_questions is None:
             qa_num = len(datasets[dataset_name])
-            print("changing qa_num")
         else:
             qa_num = number_of_questions
         for q in datasets[dataset_name]:
@@ -207,8 +204,6 @@ def main(grid: Grid, context: Context) -> None:
             questions_in_batch.append(q)
             q_st = time.time()
             if (q_idx % batch_size == 0) or (q_idx == qa_num):
-                print(len(questions_in_batch))
-                #print(questions_in_batch)
                 questions = [item['question'] for item in questions_in_batch]
                 start_qidx = q_idx - batch_size + 1
                 docs, scores = submit_questions(
