@@ -47,10 +47,10 @@ def evaluate(dataset, save_dir, split="test", locate_fun=locate_answer):
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser()
-    parser.add_argument("--llm_name", type=str, default="OpenAI/gpt-35-turbo-16k")
+    parser.add_argument("--llm_name", type=str, default="meta-llama/Meta-Llama-3-8B-Instruct")
     parser.add_argument("--rag", action=argparse.BooleanOptionalAction)
     parser.add_argument("--k", type=int, default=8)
-    parser.add_argument("--corpus_name", type=str, default="Textbooks")
+    parser.add_argument("--corpus_name", type=str, default="PubMed")
     parser.add_argument("--retriever_name", type=str, default="Contriever")
     parser.add_argument("--results_dir", type=str, default="./../prediction")
 
@@ -73,7 +73,7 @@ if __name__ == "__main__":
         if dataset_name == "medmcqa":
             split = "dev"
         if rag:
-            save_dir = os.path.join(results_dir, dataset_name, "rag_"+str(k), llm_name, corpus_name, retriever_name)
+            save_dir = os.path.join(results_dir, dataset_name, "rag_"+str(k), llm_name, corpus_name, retriever_name, "10k")
         else:
             save_dir = os.path.join(results_dir, dataset_name, "cot", llm_name)
         print(save_dir)

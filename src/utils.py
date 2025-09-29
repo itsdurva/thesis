@@ -239,7 +239,7 @@ def construct_ivfpq(index_dir,
 
 
 def construct_10k(index_dir, corpus_name, model_name, h_dim=768, HNSW=False, M=32, nlist = 4096, sv = 64, nbits = 8, configs_dir = '10k'):
-    
+
     dataset_paths = [ f.path for f in os.scandir(os.path.abspath(configs_dir)) if f.is_dir() ]
     result = set()
     for index, dataset_path in enumerate(dataset_paths):

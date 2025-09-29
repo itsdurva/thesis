@@ -15,7 +15,7 @@ def evaluate(
     total = 0
     predictions = []
 
-    for q_idx in range(len(dataset_name)):
+    for q_idx in tqdm.tqdm(range(len(dataset_name))):
         item = dataset_name[q_idx]
         question = item["question"]
         options = item["options"]
@@ -92,7 +92,7 @@ if __name__ == "__main__":
                         help="LLM model name")
     parser.add_argument("--k", type=int, default=8,
                         help="Number of retrieved documents")
-    parser.add_argument("--corpus_names", type=str, nargs="+", default=["PubMed", "Wikipedia"],
+    parser.add_argument("--corpus_names", type=str, nargs="+", default=["PubMed"],
                         help="Corpus to use for retrieval")
     parser.add_argument("--retriever_name", type=str, default="Contriever",
                         help="Retriever model name")
