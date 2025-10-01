@@ -7,6 +7,13 @@ sentence-transformers
 pyserini
 tiktoken
 datasets==2.16.1
-bitsandbytes
 git-lfs
 unzip
+openai
+faiss-gpu-cpu12
+tqdm
+tiktoken
+chromadb
+python-liquid
+bitsandbytes
+accelerate
